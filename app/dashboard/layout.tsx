@@ -1,0 +1,15 @@
+import { ReactNode } from "react";
+import Sidebar from "../components/Slidebar";
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex">
+      <Sidebar />
+      <main className="flex-1 p-6">{children}</main>
+    </div>
+  );
+}
