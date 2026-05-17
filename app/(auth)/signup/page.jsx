@@ -1,87 +1,125 @@
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function SignupPage() {
+
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const handleSignup = async () => {
+
+    try {
+
+      setLoading(true);
+
+      // 🔥 Create Auth User
+      const {
+        data,
+        error,
+      } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (error) {
+        alert(error.message);
+        setLoading(false);
+        return;
+      }
+
+      // 🔥 Get user
+      const user = data.user;
+
+      if (!user) {
+        alert("User creation failed.");
+        setLoading(false);
+        return;
+      }
+
+      // 🔥 Insert profile
+      const { error: profileError } =
+        await supabase
+          .from("profiles")
+          .insert({
+            id: user.id,
+            email: user.email,
+          });
+
+      if (profileError) {
+        console.error(profileError);
+        alert(profileError.message);
+        setLoading(false);
+        return;
+      }
+
+      // 🔥 Redirect
+      window.location.href =
+        "/onboarding";
+
+    } catch (err) {
+
+      console.error(err);
+
+      alert("Something went wrong.");
+
+    }
+
+    setLoading(false);
+  };
+
   return (
-    <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center px-4 text-white">
+    <div className="min-h-screen bg-black text-white flex items-center justify-center">
 
-      {/* 🔲 Card */}
-      <div className="w-full max-w-md bg-[#111827] border border-gray-800 rounded-2xl p-8 shadow-[0_0_60px_rgba(249,115,22,0.15)]">
+      <div className="w-full max-w-md bg-[#111827] border border-gray-800 rounded-3xl p-8">
 
-        {/* 🔥 Logo */}
-        <h1 className="text-2xl font-bold text-orange-500 text-center mb-2">
-          MailPilot AI
+        <h1 className="text-3xl font-bold mb-8">
+          Create Account
         </h1>
 
-        {/* 🧠 Heading */}
-        <h2 className="text-xl font-semibold text-center mb-1">
-          Create Your Account
-        </h2>
-        <p className="text-gray-400 text-center text-sm mb-6">
-          Start your journey with smart email automation
-        </p>
+        <div className="space-y-5">
 
-        {/* 👤 Name */}
-        <input
-          type="text"
-          placeholder="Full Name"
-          className="w-full mb-4 px-4 py-3 bg-black border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-        />
+          {/* Email */}
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) =>
+              setEmail(e.target.value)
+            }
+            className="w-full bg-black border border-gray-700 rounded-xl p-4 outline-none"
+          />
 
-        {/* 📧 Email */}
-        <input
-          type="email"
-          placeholder="Email Address"
-          className="w-full mb-4 px-4 py-3 bg-black border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-        />
+          {/* Password */}
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
+            className="w-full bg-black border border-gray-700 rounded-xl p-4 outline-none"
+          />
 
-        {/* 🔒 Password */}
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full mb-4 px-4 py-3 bg-black border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-        />
-
-        {/* 🔒 Confirm Password */}
-        <input
-          type="password"
-          placeholder="Confirm Password"
-          className="w-full mb-6 px-4 py-3 bg-black border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-        />
-
-        {/* 🚀 Create Account */}
-        <button className="w-full bg-orange-500 hover:bg-orange-600 transition py-3 rounded-lg font-medium mb-6">
-          Create Account
-        </button>
-
-        {/* 🔗 Divider */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="flex-1 h-px bg-gray-700"></div>
-          <span className="text-gray-500 text-sm">or sign up with</span>
-          <div className="flex-1 h-px bg-gray-700"></div>
-        </div>
-
-        {/* 🌐 Social Signup */}
-        <div className="flex gap-4 mb-6">
-          <button className="flex-1 bg-black border border-gray-700 py-2 rounded-lg hover:bg-gray-800 transition">
-            Google
+          {/* Button */}
+          <button
+            onClick={handleSignup}
+            className="w-full bg-orange-500 hover:bg-orange-600 py-4 rounded-xl font-medium"
+          >
+            {loading ? "Creating..." : "Sign Up"}
           </button>
 
-          <button className="flex-1 bg-black border border-gray-700 py-2 rounded-lg hover:bg-gray-800 transition">
-            Microsoft
-          </button>
         </div>
-
-        {/* 🔄 Login redirect */}
-        <p className="text-center text-sm text-gray-400">
-          Already have an account?{" "}
-          <Link href="/login" className="text-orange-400 hover:underline">
-            Login
-          </Link>
-        </p>
 
       </div>
+
     </div>
   );
 }

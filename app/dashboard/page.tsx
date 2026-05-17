@@ -1,243 +1,296 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import Sidebar from "../components/dashboard/Sidebar";
+
+import { supabase } from "@/lib/supabase";
+import { streamText } from "@/lib/streamtext";
+
+const workflowMap: Record<string, string[]> = {
+  Student: ["Study Notes", "Summary", "Assignment Help"],
+
+  Employee: ["Email Reply", "Meeting Summary", "Escalation Draft"],
+
+  Creator: ["Script Generator", "Caption Writer", "Content Ideas"],
+
+  Developer: ["Code Explanation", "Bug Fixing", "SQL Generator"],
+
+  Business: ["Proposal Generator", "Client Reply", "Customer Support"],
+};
 
 export default function DashboardPage() {
-  const [thread, setThread] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // Extracted Data
-  const [client, setClient] = useState("");
-  const [issue, setIssue] = useState("");
-  const [priority, setPriority] = useState("");
-  const [action, setAction] = useState("");
+  const [role, setRole] = useState("Student");
 
-  // Final Output
+  const [workflow, setWorkflow] = useState("");
+
+  const [workflows, setWorkflows] = useState<string[]>([]);
+
+  const [input, setInput] = useState("");
+
   const [output, setOutput] = useState("");
 
-  // 🔥 Analyze Thread
-  const handleAnalyze = async () => {
-    if (!thread) return;
+  const [loading, setLoading] = useState(false);
 
-    setLoading(true);
+  const [history, setHistory] = useState<any[]>([]);
 
-    try {
-      const res = await fetch("/api/analyze-thread", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ thread }),
-      });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-      const data = await res.json();
+  // 🔥 Load User + History
+  useEffect(() => {
+    const loadData = async () => {
+      // Session
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      setClient(data.client || "");
-      setIssue(data.issue || "");
-      setPriority(data.priority || "");
-      setAction(data.action || "");
+      if (!session) {
+        window.location.href = "/login";
+        return;
+      }
 
-    } catch (err) {
-      console.error(err);
-    }
+      const user = session.user;
 
-    setLoading(false);
-  };
+      // Profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
 
-  // 🔥 Generate Reply
+      if (!profile?.onboarding_complete) {
+        window.location.href = "/onboarding";
+        return;
+      }
+
+      setRole(profile.role);
+
+      const roleWorkflows = workflowMap[profile.role] || workflowMap["Student"];
+
+      setWorkflows(roleWorkflows);
+
+      setWorkflow(roleWorkflows[0]);
+
+      // 🔥 History
+      const { data: historyData } = await supabase
+        .from("ai_history")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", {
+          ascending: false,
+        });
+
+      setHistory(historyData || []);
+      setCheckingAuth(false);
+    };
+
+    loadData();
+  }, []);
+
+  // 🔥 Generate AI
   const handleGenerate = async () => {
+    if (!input) return;
+
     setLoading(true);
+
+    setOutput("");
+
+    await streamText(data.output, (streamedText) => {
+      setOutput(streamedText);
+    });
 
     const prompt = `
-Client: ${client}
+Role: ${role}
 
-Issue: ${issue}
+Workflow: ${workflow}
 
-Priority: ${priority}
-
-Pending Action: ${action}
-
-Original Thread:
-${thread}
-
-Write a professional business email reply.
+User Input:
+${input}
 `;
 
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ input: prompt }),
-      });
+try {
 
-      const data = await res.json();
+  // API call
+  const res = await fetch(
+    "/api/generate",
+    {
+      method: "POST",
 
-      setOutput(data.output);
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
 
-      // Save History
-      const history = JSON.parse(
-        localStorage.getItem("history") || "[]"
-      );
-
-      const newEntry = {
-        id: Date.now(),
-        thread,
-        output: data.output,
-        createdAt: new Date().toLocaleString(),
-      };
-
-      localStorage.setItem(
-        "history",
-        JSON.stringify([newEntry, ...history])
-      );
-
-    } catch (err) {
-      console.error(err);
+      body: JSON.stringify({
+        input: prompt,
+      }),
     }
+  );
 
-    setLoading(false);
+  // Response JSON
+  const data = await res.json();
+
+  // Clear old output
+  setOutput("");
+
+  // 🔥 Streaming Effect
+  await streamText(
+    data.output,
+    (streamedText) => {
+      setOutput(streamedText);
+    }
+  );
+
+  // Session
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const user = session?.user;
+
+  if (!user) return;
+
+  // Save history
+  const { data: savedHistory } =
+    await supabase
+      .from("ai_history")
+      .insert({
+        user_id: user.id,
+        role,
+        workflow,
+        input,
+        output: data.output,
+      })
+      .select()
+      .single();
+
+  // Update sidebar
+  if (savedHistory) {
+
+    setHistory((prev) => [
+      savedHistory,
+      ...prev,
+    ]);
+
+    setSelectedId(savedHistory.id);
+  }
+
+} catch (err) {
+
+  console.error(err);
+
+  setOutput(
+    "Something went wrong."
+  );
+}
   };
 
+  // 🔥 Load history item
+  const handleSelectHistory = (item: any) => {
+    setSelectedId(item.id);
+
+    setWorkflow(item.workflow);
+
+    setInput(item.input);
+
+    setOutput(item.output);
+  };
+
+  // 🔥 New Workspace
+  const handleNewChat = () => {
+    setSelectedId(null);
+
+    setInput("");
+
+    setOutput("");
+
+    setWorkflow(workflows[0]);
+  };
+
+  if (checkingAuth) {
+    return (
+      <div className="h-screen bg-[#050816] flex items-center justify-center text-white">
+        Loading Workspace...
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-6">
+    <div className="h-screen bg-[#050816] text-white flex overflow-hidden">
+      {/* Sidebar */}
+      <Sidebar
+        history={history}
+        selectedId={selectedId}
+        onSelect={handleSelectHistory}
+        onNewChat={handleNewChat}
+      />
 
-      {/* 🧠 LEFT PANEL */}
-      <div className="space-y-6">
+      {/* Main */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="border-b border-white/10 px-8 h-20 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">AI Workspace</h1>
 
-        {/* Thread Input */}
-        <div className="bg-[#111827] border border-gray-800 rounded-2xl p-6">
-
-          <h2 className="text-xl font-semibold mb-4">
-            Paste Email Thread
-          </h2>
-
-          <textarea
-            value={thread}
-            onChange={(e) => setThread(e.target.value)}
-            placeholder="Paste Outlook/Gmail thread here..."
-            className="w-full h-72 bg-black border border-gray-700 rounded-xl p-4 text-sm resize-none"
-          />
-
-          <button
-            onClick={handleAnalyze}
-            className="mt-4 w-full bg-orange-500 hover:bg-orange-600 py-3 rounded-xl font-medium"
-          >
-            {loading ? "Analyzing..." : "Analyze Thread"}
-          </button>
-
-        </div>
-
-        {/* Extracted Insights */}
-        <div className="bg-[#111827] border border-gray-800 rounded-2xl p-6">
-
-          <div className="flex justify-between items-center mb-5">
-            <h2 className="text-xl font-semibold">
-              Extracted Context
-            </h2>
-
-            <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-              AI Powered
-            </span>
+            <p className="text-sm text-gray-400">{role} Mode</p>
           </div>
 
-          <div className="space-y-4">
+          {/* Workflow */}
+          <select
+            value={workflow}
+            onChange={(e) => setWorkflow(e.target.value)}
+            className="bg-[#111827] border border-white/10 rounded-xl px-4 py-2"
+          >
+            {workflows.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
 
-            {/* Client */}
-            <div>
-              <label className="text-sm text-gray-400">
-                Client
-              </label>
+        {/* Workspace */}
+        <div className="flex-1 grid grid-cols-2 gap-6 p-6 overflow-hidden">
+          {/* Input */}
+          <div className="bg-[#111827] border border-white/10 rounded-3xl p-6 flex flex-col">
+            <h2 className="text-xl font-semibold mb-5">Input</h2>
 
-              <input
-                value={client}
-                onChange={(e) => setClient(e.target.value)}
-                className="mt-1 w-full bg-black border border-gray-700 rounded-lg p-3"
-              />
-            </div>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Paste anything..."
+              className="flex-1 bg-black border border-white/10 rounded-2xl p-5 resize-none outline-none"
+            />
 
-            {/* Issue */}
-            <div>
-              <label className="text-sm text-gray-400">
-                Issue
-              </label>
+            <button
+              onClick={handleGenerate}
+              className="mt-5 bg-orange-500 hover:bg-orange-600 py-3 rounded-2xl font-medium"
+            >
+              {loading ? "Generating..." : "Generate"}
+            </button>
+          </div>
 
-              <input
-                value={issue}
-                onChange={(e) => setIssue(e.target.value)}
-                className="mt-1 w-full bg-black border border-gray-700 rounded-lg p-3"
-              />
-            </div>
+          {/* Output */}
+          <div className="bg-[#111827] border border-white/10 rounded-3xl p-6 flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xl font-semibold">AI Output</h2>
 
-            {/* Priority */}
-            <div>
-              <label className="text-sm text-gray-400">
-                Priority
-              </label>
-
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="mt-1 w-full bg-black border border-gray-700 rounded-lg p-3"
+              <button
+                onClick={() => navigator.clipboard.writeText(output)}
+                className="bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl text-sm"
               >
-                <option>Low</option>
-                <option>Medium</option>
-                <option>High</option>
-                <option>Critical</option>
-              </select>
+                Copy
+              </button>
             </div>
 
-            {/* Action */}
-            <div>
-              <label className="text-sm text-gray-400">
-                Pending Action
-              </label>
-
-              <input
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                className="mt-1 w-full bg-black border border-gray-700 rounded-lg p-3"
-              />
+            <div className="flex-1 bg-black border border-white/10 rounded-2xl p-5 overflow-y-auto whitespace-pre-wrap">
+              {output || "AI output will appear here"}
             </div>
-
           </div>
-
-          <button
-            onClick={handleGenerate}
-            className="mt-6 w-full bg-orange-500 hover:bg-orange-600 py-3 rounded-xl font-medium"
-          >
-            {loading ? "Generating..." : "Generate Reply"}
-          </button>
-
         </div>
-
       </div>
-
-      {/* 📤 RIGHT PANEL */}
-      <div className="bg-[#111827] border border-gray-800 rounded-2xl p-6 flex flex-col">
-
-        <div className="flex justify-between items-center mb-5">
-
-          <h2 className="text-xl font-semibold">
-            AI Generated Reply
-          </h2>
-
-          <button
-            className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg text-sm"
-            onClick={() => navigator.clipboard.writeText(output)}
-          >
-            Copy
-          </button>
-
-        </div>
-
-        <div className="flex-1 bg-black border border-gray-700 rounded-xl p-5 whitespace-pre-wrap text-sm overflow-y-auto">
-          {output || "AI-generated response will appear here"}
-        </div>
-
-      </div>
-
     </div>
   );
 }
