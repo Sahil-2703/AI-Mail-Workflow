@@ -20,7 +20,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="w-64 h-screen bg-black border-r border-gray-800 p-4">
+    <div className="w-64 bg-black border-r border-gray-800 p-4">
       <h1 className="text-xl font-bold text-orange-500 mb-6">
         MailPilot
       </h1>

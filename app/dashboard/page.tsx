@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 
 import Sidebar from "../components/dashboard/Sidebar";
-
 import { supabase } from "@/lib/supabase";
 import { streamText } from "@/lib/streamtext";
+import FileUploader from "../components/dashboard/FileUploader";
 
 const workflowMap: Record<string, string[]> = {
   Student: ["Study Notes", "Summary", "Assignment Help"],
@@ -20,6 +20,10 @@ const workflowMap: Record<string, string[]> = {
 };
 
 export default function DashboardPage() {
+  const [uploadedFileName, setUploadedFileName] = useState("");
+
+  const [uploadedContent, setUploadedContent] = useState("");
+
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [role, setRole] = useState("Student");
@@ -89,6 +93,14 @@ export default function DashboardPage() {
     loadData();
   }, []);
 
+  const handleFileRead = (content: string, fileName: string) => {
+    setUploadedContent(content);
+
+    setUploadedFileName(fileName);
+
+    setInput(content);
+  };
+
   // 🔥 Generate AI
   const handleGenerate = async () => {
     if (!input) return;
@@ -97,94 +109,80 @@ export default function DashboardPage() {
 
     setOutput("");
 
-    await streamText(data.output, (streamedText) => {
-      setOutput(streamedText);
-    });
+    // await streamText(data.output, (streamedText) => {
+    //   setOutput(streamedText);
+    // });
 
     const prompt = `
 Role: ${role}
 
 Workflow: ${workflow}
 
-User Input:
+Uploaded File:
+${uploadedFileName || "None"}
+
+Content:
 ${input}
 `;
 
-try {
+    try {
+      // API call
+      const res = await fetch("/api/generate", {
+        method: "POST",
 
-  // API call
-  const res = await fetch(
-    "/api/generate",
-    {
-      method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
 
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
+        body: JSON.stringify({
+          input: prompt,
+        }),
+      });
 
-      body: JSON.stringify({
-        input: prompt,
-      }),
+      // Response JSON
+      const data = await res.json();
+
+      // Clear old output
+      setOutput("");
+
+      // 🔥 Streaming Effect
+      await streamText(data.output, (streamedText) => {
+        setOutput(streamedText);
+      });
+
+      // Session
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const user = session?.user;
+
+      if (!user) return;
+
+      // Save history
+      const { data: savedHistory } = await supabase
+        .from("ai_history")
+        .insert({
+          user_id: user.id,
+          role,
+          workflow,
+          input,
+          output: data.output,
+        })
+        .select()
+        .single();
+
+      // Update sidebar
+      if (savedHistory) {
+        setHistory((prev) => [savedHistory, ...prev]);
+
+        setSelectedId(savedHistory.id);
+      }
+    } catch (err) {
+      console.error(err);
+
+      setOutput("Something went wrong.");
     }
-  );
-
-  // Response JSON
-  const data = await res.json();
-
-  // Clear old output
-  setOutput("");
-
-  // 🔥 Streaming Effect
-  await streamText(
-    data.output,
-    (streamedText) => {
-      setOutput(streamedText);
-    }
-  );
-
-  // Session
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  const user = session?.user;
-
-  if (!user) return;
-
-  // Save history
-  const { data: savedHistory } =
-    await supabase
-      .from("ai_history")
-      .insert({
-        user_id: user.id,
-        role,
-        workflow,
-        input,
-        output: data.output,
-      })
-      .select()
-      .single();
-
-  // Update sidebar
-  if (savedHistory) {
-
-    setHistory((prev) => [
-      savedHistory,
-      ...prev,
-    ]);
-
-    setSelectedId(savedHistory.id);
-  }
-
-} catch (err) {
-
-  console.error(err);
-
-  setOutput(
-    "Something went wrong."
-  );
-}
   };
 
   // 🔥 Load history item
@@ -256,6 +254,8 @@ try {
           {/* Input */}
           <div className="bg-[#111827] border border-white/10 rounded-3xl p-6 flex flex-col">
             <h2 className="text-xl font-semibold mb-5">Input</h2>
+
+            <FileUploader onFileRead={handleFileRead} />
 
             <textarea
               value={input}
